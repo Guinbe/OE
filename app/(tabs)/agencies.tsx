@@ -10,18 +10,9 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../contexts/UserContext';
+import { supabase, Agency } from '@/lib/supabase';
 
-interface Agency {
-  id: string;
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  manager: string;
-  createdAt: string;
-}
 
 export default function AgenciesScreen() {
   const { user } = useUser();
@@ -36,7 +27,7 @@ export default function AgenciesScreen() {
     manager: '',
   });
 
-  const isAdmin = user?.email === 'admin@gmail.com';
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
     loadAgencies();
@@ -44,21 +35,59 @@ export default function AgenciesScreen() {
 
   const loadAgencies = async () => {
     try {
-      const storedAgencies = await AsyncStorage.getItem('agencies');
-      if (storedAgencies) {
-        setAgencies(JSON.parse(storedAgencies));
+      const { data, error } = await supabase
+        .from('agencies')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error loading agencies:', error);
+        return;
       }
+      
+      setAgencies(data || []);
     } catch (error) {
       console.error('Error loading agencies:', error);
     }
   };
 
-  const saveAgencies = async (newAgencies: Agency[]) => {
+  const handleSaveAgency = async () => {
+    if (!formData.name || !formData.address || !formData.phone) {
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+
     try {
-      await AsyncStorage.setItem('agencies', JSON.stringify(newAgencies));
-      setAgencies(newAgencies);
+      if (editingAgency) {
+        // Update existing agency
+        const { error } = await supabase
+          .from('agencies')
+          .update(formData)
+          .eq('id', editingAgency.id);
+        
+        if (error) {
+          console.error('Error updating agency:', error);
+          Alert.alert('Erreur', 'Impossible de modifier l\'agence');
+          return;
+        }
+      } else {
+        // Add new agency
+        const { error } = await supabase
+          .from('agencies')
+          .insert(formData);
+        
+        if (error) {
+          console.error('Error creating agency:', error);
+          Alert.alert('Erreur', 'Impossible de créer l\'agence');
+          return;
+        }
+      }
+
+      setModalVisible(false);
+      loadAgencies(); // Reload agencies
     } catch (error) {
-      console.error('Error saving agencies:', error);
+      console.error('Error saving agency:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
     }
   };
 
@@ -96,40 +125,29 @@ export default function AgenciesScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            const updatedAgencies = agencies.filter(a => a.id !== agencyId);
-            await saveAgencies(updatedAgencies);
+            try {
+              const { error } = await supabase
+                .from('agencies')
+                .delete()
+                .eq('id', agencyId);
+              
+              if (error) {
+                console.error('Error deleting agency:', error);
+                Alert.alert('Erreur', 'Impossible de supprimer l\'agence');
+                return;
+              }
+              
+              loadAgencies(); // Reload agencies
+            } catch (error) {
+              console.error('Error deleting agency:', error);
+              Alert.alert('Erreur', 'Une erreur est survenue');
+            }
           },
         },
       ]
     );
   };
 
-  const handleSaveAgency = async () => {
-    if (!formData.name || !formData.address || !formData.phone) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
-      return;
-    }
-
-    if (editingAgency) {
-      // Update existing agency
-      const updatedAgencies = agencies.map(agency =>
-        agency.id === editingAgency.id
-          ? { ...agency, ...formData }
-          : agency
-      );
-      await saveAgencies(updatedAgencies);
-    } else {
-      // Add new agency
-      const newAgency: Agency = {
-        id: Date.now().toString(),
-        ...formData,
-        createdAt: new Date().toISOString(),
-      };
-      await saveAgencies([...agencies, newAgency]);
-    }
-
-    setModalVisible(false);
-  };
 
   const renderAgency = ({ item }: { item: Agency }) => (
     <View style={styles.agencyCard}>

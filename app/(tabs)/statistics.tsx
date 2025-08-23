@@ -16,42 +16,24 @@ import { LineChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../contexts/UserContext';
-
-interface Voyage {
-  id: string;
-  nomChauffeur: string;
-  numeroVehicule: string;
-  numeroBordereau: string;
-  recetteBrute: number;
-  retenue: number;
-  nombrePlaces: number;
-  date: string;
-  agence: string;
-  ville: string;
-  agentNom: string;
-  agentPrenom: string;
-  agentEmail: string;
-  createdBy: string;
-  userRole: string;
-}
+import { supabase, Voyage } from '@/lib/supabase';
 
 const StatisticsScreen = () => {
-const { user } = useUser();
-const [selectedPeriod, setSelectedPeriod] = useState('week');
-const [showCustomModal, setShowCustomModal] = useState(false);
-const [customStartDate, setCustomStartDate] = useState('');
-const [customEndDate, setCustomEndDate] = useState('');
-const [customPeriodLabel, setCustomPeriodLabel] = useState('Janvier - Juin 2025');
-const [startDateError, setStartDateError] = useState('');
-const [endDateError, setEndDateError] = useState('');
-const [dateRangeError, setDateRangeError] = useState('');
-const [voyages, setVoyages] = useState<Voyage[]>([]);
-const [filteredVoyages, setFilteredVoyages] = useState<Voyage[]>([]);
-const [isAdmin, setIsAdmin] = useState(false);
-const [loading, setLoading] = useState(true);
-const screenWidth = Dimensions.get('window').width;
+  const { user } = useUser();
+  const [selectedPeriod, setSelectedPeriod] = useState('week');
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [customPeriodLabel, setCustomPeriodLabel] = useState('Janvier - Juin 2025');
+  const [startDateError, setStartDateError] = useState('');
+  const [endDateError, setEndDateError] = useState('');
+  const [dateRangeError, setDateRangeError] = useState('');
+  const [voyages, setVoyages] = useState<Voyage[]>([]);
+  const [filteredVoyages, setFilteredVoyages] = useState<Voyage[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const screenWidth = Dimensions.get('window').width;
 
 const periods = [
   { id: 'day', label: 'Jour', icon: 'today' },
@@ -60,50 +42,51 @@ const periods = [
   { id: 'custom', label: 'Personnalisé', icon: 'options' },
 ];
 
-useEffect(() => {
-  checkUserRole();
-  loadVoyages();
-}, [user]);
+  useEffect(() => {
+    checkUserRole();
+    loadVoyages();
+  }, [user]);
 
-useEffect(() => {
-  filterVoyagesByPeriod();
-}, [selectedPeriod, voyages, customStartDate, customEndDate]);
+  useEffect(() => {
+    filterVoyagesByPeriod();
+  }, [selectedPeriod, voyages, customStartDate, customEndDate]);
 
-const checkUserRole = () => {
-  if (user?.email === 'admin@gmail.com') {
-    setIsAdmin(true);
-  } else {
-    setIsAdmin(false);
-  }
-};
-
-const loadVoyages = async () => {
-  try {
-    setLoading(true);
-    const storedVoyages = await AsyncStorage.getItem('voyages');
-    let allVoyages: Voyage[] = [];
-    
-    if (storedVoyages) {
-      allVoyages = JSON.parse(storedVoyages);
+  const checkUserRole = () => {
+    if (user?.role === 'admin') {
+      setIsAdmin(true);
+    } else {
+      setIsAdmin(false);
     }
+  };
 
-    // Filter voyages based on user role
-    let userVoyages = allVoyages;
-    if (!isAdmin && user) {
-      userVoyages = allVoyages.filter(voyage =>
-        voyage.createdBy === user.email ||
-        voyage.agentEmail === user.email
-      );
+  const loadVoyages = async () => {
+    try {
+      setLoading(true);
+      
+      let query = supabase.from('voyages').select('*');
+      
+      // Filter voyages based on user role
+      if (!isAdmin && user) {
+        query = query.eq('agent_id', user.id);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('Error loading voyages:', error);
+        Alert.alert('Erreur', 'Impossible de charger les données');
+        setLoading(false);
+        return;
+      }
+
+      setVoyages(data || []);
+    } catch (error) {
+      console.error('Error loading voyages:', error);
+      Alert.alert('Erreur', 'Impossible de charger les données');
+    } finally {
+      setLoading(false);
     }
-
-    setVoyages(userVoyages);
-  } catch (error) {
-    console.error('Error loading voyages:', error);
-    Alert.alert('Erreur', 'Impossible de charger les données');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
 const filterVoyagesByPeriod = () => {
   const now = new Date();
@@ -212,7 +195,7 @@ const calculateHourlyData = () => {
   filteredVoyages.forEach(voyage => {
     const date = new Date(voyage.date);
     const hour = date.getHours();
-    hourlyData[hour] += voyage.recetteBrute;
+    hourlyData[hour] += voyage.recette_brute;
   });
   
   return { labels: hourlyLabels, values: hourlyData };
@@ -225,7 +208,7 @@ const calculateWeeklyData = () => {
   filteredVoyages.forEach(voyage => {
     const date = new Date(voyage.date);
     const dayOfWeek = (date.getDay() + 6) % 7; // Monday = 0
-    dailyData[dayOfWeek] += voyage.recetteBrute;
+    dailyData[dayOfWeek] += voyage.recette_brute;
   });
   
   return { labels: days, values: dailyData };
@@ -238,7 +221,7 @@ const calculateMonthlyData = () => {
   filteredVoyages.forEach(voyage => {
     const date = new Date(voyage.date);
     const weekOfMonth = Math.min(Math.floor(date.getDate() / 7), 3);
-    weeklyData[weekOfMonth] += voyage.recetteBrute;
+    weeklyData[weekOfMonth] += voyage.recette_brute;
   });
   
   return { labels: weeks, values: weeklyData };
@@ -270,7 +253,7 @@ const calculateCustomData = () => {
         const voyageDate = new Date(voyage.date);
         return voyageDate >= monthStart && voyageDate <= monthEnd;
       })
-      .reduce((sum, voyage) => sum + voyage.recetteBrute, 0);
+      .reduce((sum, voyage) => sum + voyage.recette_brute, 0);
     
     monthlyData.push(monthTotal);
     current.setMonth(current.getMonth() + 1);
@@ -281,8 +264,8 @@ const calculateCustomData = () => {
 
 const getStats = () => {
   const totalVoyages = filteredVoyages.length;
-  const totalRecettes = filteredVoyages.reduce((sum, voyage) => sum + voyage.recetteBrute, 0);
-  const totalPassagers = filteredVoyages.reduce((sum, voyage) => sum + voyage.nombrePlaces, 0);
+  const totalRecettes = filteredVoyages.reduce((sum, voyage) => sum + voyage.recette_brute, 0);
+  const totalPassagers = filteredVoyages.reduce((sum, voyage) => sum + voyage.nombre_places, 0);
 
   return [
     { title: 'Voyages', value: totalVoyages.toString(), icon: 'bus', color: '#007bff' },
@@ -292,15 +275,15 @@ const getStats = () => {
 };
 
 const getSummary = () => {
-  const totalRecettes = filteredVoyages.reduce((sum, voyage) => sum + voyage.recetteBrute, 0);
+  const totalRecettes = filteredVoyages.reduce((sum, voyage) => sum + voyage.recette_brute, 0);
   const averageDaily = filteredVoyages.length > 0 ? totalRecettes / filteredVoyages.length : 0;
   
   let bestVoyage = null;
   let bestAmount = 0;
   
   filteredVoyages.forEach(voyage => {
-    if (voyage.recetteBrute > bestAmount) {
-      bestAmount = voyage.recetteBrute;
+    if (voyage.recette_brute > bestAmount) {
+      bestAmount = voyage.recette_brute;
       bestVoyage = voyage;
     }
   });

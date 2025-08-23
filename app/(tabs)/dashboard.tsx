@@ -9,24 +9,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import OriginalExpressLogo from '../../assets/images/logo';
 import { useUser } from '../contexts/UserContext';
+import { supabase } from '@/lib/supabase';
 
-interface Voyage {
-  id: string;
-  date: string;
-  destination: string;
-  chauffeur: string;
-  vehicule: string;
-  recette: number;
-  createdBy: string;
-}
 
 const DashboardScreen = () => {
   const router = useRouter();
   const { user } = useUser();
-  const [voyages, setVoyages] = useState<Voyage[]>([]);
+  const [voyages, setVoyages] = useState<any[]>([]);
   const [statsData, setStatsData] = useState({
     voyagesToday: 0,
     totalRevenue: 0,
@@ -42,52 +33,58 @@ const DashboardScreen = () => {
 
   const loadVoyages = async () => {
     try {
-      const voyagesData = await AsyncStorage.getItem('voyages');
-      if (voyagesData) {
-        const allVoyages: Voyage[] = JSON.parse(voyagesData);
-        
-        // Filter voyages based on user role
-        const filteredVoyages = user?.email === 'admin@gmail.com'
-          ? allVoyages
-          : allVoyages.filter(voyage => voyage.createdBy === user?.email);
-
-        // Calculate today's date
-        const today = new Date().toISOString().split('T')[0];
-        
-        // Calculate stats
-        const todayVoyages = filteredVoyages.filter(voyage =>
-          voyage.date === today
-        );
-
-        const activeDrivers = new Set<string>();
-        const activeVehicles = new Set<string>();
-        let totalRevenue = 0;
-
-        todayVoyages.forEach(voyage => {
-          activeDrivers.add(voyage.chauffeur);
-          activeVehicles.add(voyage.vehicule);
-          totalRevenue += voyage.recette || 0;
-        });
-
-        setStatsData({
-          voyagesToday: todayVoyages.length,
-          totalRevenue,
-          activeDrivers,
-          activeVehicles,
-        });
-        
-        setVoyages(filteredVoyages);
+      let query = supabase.from('voyages').select('*');
+      
+      // Filter based on user role
+      if (user?.role !== 'admin') {
+        query = query.eq('agent_id', user?.id);
       }
+      
+      const { data: voyagesData, error } = await query;
+      
+      if (error) {
+        console.error('Error loading voyages:', error);
+        return;
+      }
+      
+      const allVoyages = voyagesData || [];
+      
+      // Calculate today's date
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Calculate stats
+      const todayVoyages = allVoyages.filter(voyage =>
+        voyage.date === today
+      );
+
+      const activeDrivers = new Set<string>();
+      const activeVehicles = new Set<string>();
+      let totalRevenue = 0;
+
+      todayVoyages.forEach(voyage => {
+        activeDrivers.add(voyage.nom_chauffeur);
+        activeVehicles.add(voyage.numero_vehicule);
+        totalRevenue += voyage.recette_brute || 0;
+      });
+
+      setStatsData({
+        voyagesToday: todayVoyages.length,
+        totalRevenue,
+        activeDrivers,
+        activeVehicles,
+      });
+      
+      setVoyages(allVoyages);
     } catch (error) {
       console.error('Error loading voyages:', error);
     }
   };
 
   const quickActions = [
-    { title: 'Nouveau voyage', icon: 'add-circle', screen: '/inventory' },
-    { title: 'Statistiques', icon: 'stats-chart', screen: '/statistics' },
-    { title: 'Messages', icon: 'chatbubbles', screen: '/messages' },
-    { title: 'Personnel', icon: 'people', screen: '/personnel' },
+    { title: 'Nouveau voyage', icon: 'add-circle', screen: '/(tabs)/inventory' },
+    { title: 'Statistiques', icon: 'stats-chart', screen: '/(tabs)/statistics' },
+    { title: 'Messages', icon: 'chatbubbles', screen: '/(tabs)/messages' },
+    { title: 'Personnel', icon: 'people', screen: '/(tabs)/personnel' },
   ];
 
   const dashboardStats = [

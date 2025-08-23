@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../contexts/UserContext';
+import { supabase, Personnel } from '@/lib/supabase';
 
 const AGENCES = [
   'Maroua',
@@ -31,88 +32,53 @@ const ROLES = [
   'Agent comptable'
 ];
 
-interface Personnel {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  role: string;
-  agency: string;
-  status: 'active' | 'inactive' | 'pending';
-  joinDate: string;
-}
-
 const PersonnelScreen = () => {
   const { user } = useUser();
   const [isAdmin, setIsAdmin] = useState(false);
-  const [personnel, setPersonnel] = useState<Personnel[]>([
-    {
-      id: '1',
-      fullName: 'Jean Dupont',
-      email: 'jean.dupont@originalexpress.com',
-      phone: '+237 6 12 34 56 78',
-      role: 'Chauffeur',
-      agency: 'Yaoundé',
-      status: 'active',
-      joinDate: '2024-01-15',
-    },
-    {
-      id: '2',
-      fullName: 'Marie Martin',
-      email: 'marie.martin@originalexpress.com',
-      phone: '+237 6 98 76 54 32',
-      role: 'Logisticienne',
-      agency: 'Douala',
-      status: 'active',
-      joinDate: '2024-02-20',
-    },
-    {
-      id: '3',
-      fullName: 'Pierre Bernard',
-      email: 'pierre.bernard@originalexpress.com',
-      phone: '+237 6 55 44 33 22',
-      role: 'Mécanicien',
-      agency: 'Maroua',
-      status: 'inactive',
-      joinDate: '2023-11-10',
-    },
-    {
-      id: '4',
-      fullName: 'Sophie Dubois',
-      email: 'sophie.dubois@originalexpress.com',
-      phone: '+237 6 77 88 99 00',
-      role: 'Agent comptable',
-      agency: 'Yaoundé',
-      status: 'pending',
-      joinDate: '2024-08-15',
-    },
-  ]);
+  const [personnel, setPersonnel] = useState<Personnel[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
   const [modalVisible, setModalVisible] = useState(false);
   const [newPersonnel, setNewPersonnel] = useState({
-    fullName: '',
+    full_name: '',
     email: '',
     phone: '',
     role: '',
     agency: '',
-    password: '',
-    confirmPassword: '',
   });
 
   useEffect(() => {
-    if (user?.email === 'admin@gmail.com') {
+    if (user?.role === 'admin') {
       setIsAdmin(true);
+      loadPersonnel();
     } else {
       setIsAdmin(false);
     }
   }, [user]);
 
+  const loadPersonnel = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('personnel')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error loading personnel:', error);
+        return;
+      }
+      
+      setPersonnel(data || []);
+    } catch (error) {
+      console.error('Error loading personnel:', error);
+    }
+  };
+
   const filteredPersonnel = personnel.filter(
     (person) => {
       const matchesSearch =
-        person.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        person.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         person.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
         person.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
         person.agency.toLowerCase().includes(searchQuery.toLowerCase());
@@ -125,57 +91,62 @@ const PersonnelScreen = () => {
 
   const pendingPersonnelCount = personnel.filter(p => p.status === 'pending').length;
 
-  const handleAddPersonnel = () => {
-    if (!newPersonnel.fullName || !newPersonnel.email || !newPersonnel.phone || !newPersonnel.role || !newPersonnel.agency || !newPersonnel.password || !newPersonnel.confirmPassword) {
+  const handleAddPersonnel = async () => {
+    if (!newPersonnel.full_name || !newPersonnel.email || !newPersonnel.phone || !newPersonnel.role || !newPersonnel.agency) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs');
       return;
     }
 
-    if (newPersonnel.password !== newPersonnel.confirmPassword) {
-      Alert.alert('Erreur', 'Les mots de passe ne correspondent pas');
-      return;
+    try {
+      const { error } = await supabase
+        .from('personnel')
+        .insert({
+          ...newPersonnel,
+          join_date: new Date().toISOString().split('T')[0],
+        });
+      
+      if (error) {
+        console.error('Error adding personnel:', error);
+        Alert.alert('Erreur', 'Impossible d\'ajouter le personnel');
+        return;
+      }
+      
+      setNewPersonnel({ full_name: '', email: '', phone: '', role: '', agency: '' });
+      setModalVisible(false);
+      loadPersonnel();
+      
+      Alert.alert('Succès', 'Le personnel a été ajouté avec succès.');
+    } catch (error) {
+      console.error('Error adding personnel:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
     }
-
-    if (newPersonnel.password.length < 6) {
-      Alert.alert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères');
-      return;
-    }
-
-    const newPerson: Personnel = {
-      id: Date.now().toString(),
-      fullName: newPersonnel.fullName,
-      email: newPersonnel.email,
-      phone: newPersonnel.phone,
-      role: newPersonnel.role,
-      agency: newPersonnel.agency,
-      status: 'pending',
-      joinDate: new Date().toISOString().split('T')[0],
-    };
-
-    setPersonnel([...personnel, newPerson]);
-    setNewPersonnel({ fullName: '', email: '', phone: '', role: '', agency: '', password: '', confirmPassword: '' });
-    setModalVisible(false);
-    
-    Alert.alert('Succès', 'Le personnel a été ajouté avec succès. Il doit être validé par un administrateur.');
   };
 
   const handleToggleStatus = (id: string) => {
-    setPersonnel(
-      personnel.map((person) => {
-        if (person.id === id) {
-          let newStatus: 'active' | 'inactive' | 'pending';
-          if (person.status === 'pending') {
-            newStatus = 'active';
-          } else if (person.status === 'active') {
-            newStatus = 'inactive';
-          } else {
-            newStatus = 'active';
-          }
-          return { ...person, status: newStatus };
+    const person = personnel.find(p => p.id === id);
+    if (!person) return;
+    
+    let newStatus: 'active' | 'inactive' | 'pending';
+    if (person.status === 'pending') {
+      newStatus = 'active';
+    } else if (person.status === 'active') {
+      newStatus = 'inactive';
+    } else {
+      newStatus = 'active';
+    }
+    
+    supabase
+      .from('personnel')
+      .update({ status: newStatus })
+      .eq('id', id)
+      .then(({ error }) => {
+        if (error) {
+          console.error('Error updating personnel status:', error);
+          Alert.alert('Erreur', 'Impossible de modifier le statut');
+        } else {
+          loadPersonnel();
         }
-        return person;
-      })
-    );
+      });
   };
 
   const handleDeletePersonnel = (id: string) => {
@@ -187,7 +158,25 @@ const PersonnelScreen = () => {
         {
           text: 'Supprimer',
           style: 'destructive',
-          onPress: () => setPersonnel(personnel.filter((person) => person.id !== id)),
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('personnel')
+                .delete()
+                .eq('id', id);
+              
+              if (error) {
+                console.error('Error deleting personnel:', error);
+                Alert.alert('Erreur', 'Impossible de supprimer le personnel');
+                return;
+              }
+              
+              loadPersonnel();
+            } catch (error) {
+              console.error('Error deleting personnel:', error);
+              Alert.alert('Erreur', 'Une erreur est survenue');
+            }
+          },
         },
       ]
     );
@@ -197,10 +186,10 @@ const PersonnelScreen = () => {
     <View style={styles.personnelCard}>
       <View style={styles.personnelInfo}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{item.fullName.charAt(0)}</Text>
+          <Text style={styles.avatarText}>{item.full_name.charAt(0)}</Text>
         </View>
         <View style={styles.personnelDetails}>
-          <Text style={styles.personnelName}>{item.fullName}</Text>
+          <Text style={styles.personnelName}>{item.full_name}</Text>
           <Text style={styles.personnelEmail}>{item.email}</Text>
           <Text style={styles.personnelPhone}>{item.phone}</Text>
           <Text style={styles.personnelRole}>{item.role}</Text>
@@ -345,8 +334,8 @@ const PersonnelScreen = () => {
             <TextInput
               style={styles.input}
               placeholder="Nom complet"
-              value={newPersonnel.fullName}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, fullName: text })}
+              value={newPersonnel.full_name}
+              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, full_name: text })}
             />
             
             <TextInput
@@ -407,22 +396,6 @@ const PersonnelScreen = () => {
               </View>
             </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Mot de passe"
-              secureTextEntry
-              value={newPersonnel.password}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, password: text })}
-            />
-
-            <TextInput
-              style={styles.input}
-              placeholder="Confirmer le mot de passe"
-              secureTextEntry
-              value={newPersonnel.confirmPassword}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, confirmPassword: text })}
-            />
-            
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}

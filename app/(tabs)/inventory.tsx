@@ -14,146 +14,108 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useUser } from '../contexts/UserContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase, Voyage } from '@/lib/supabase';
 
-interface Voyage {
-  id: string;
-  nomChauffeur: string;
-  numeroVehicule: string;
-  numeroBordereau: string;
-  recetteBrute: number;
-  retenue: number;
-  nombrePlaces: number;
-  date: string;
-  agence: string;
-  ville: string;
-  agentNom: string;
-  agentPrenom: string;
-  agentEmail: string;
-  createdBy: string;
-  userRole: 'admin' | 'user';
-}
 
 const InventoryScreen = () => {
-const { user } = useUser();
-const [voyages, setVoyages] = useState<Voyage[]>([]);
-const [allVoyages, setAllVoyages] = useState<Voyage[]>([]);
-const [isAdmin, setIsAdmin] = useState(false);
-const [formData, setFormData] = useState({
-  nomChauffeur: '',
-  numeroVehicule: '',
-  numeroBordereau: '',
-  recetteBrute: '',
-  retenue: '',
-  nombrePlaces: '',
-});
+  const { user } = useUser();
+  const [voyages, setVoyages] = useState<Voyage[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [formData, setFormData] = useState({
+    nomChauffeur: '',
+    numeroVehicule: '',
+    numeroBordereau: '',
+    recetteBrute: '',
+    retenue: '',
+    nombrePlaces: '',
+  });
+  const [showForm, setShowForm] = useState(false);
 
-useEffect(() => {
-  if (user) {
-    setIsAdmin(user.role === 'admin');
-    loadVoyages();
-  }
-}, [user]);
-
-const loadVoyages = async () => {
-  try {
-    const voyagesData = await AsyncStorage.getItem('voyages');
-    if (voyagesData) {
-      const allVoyagesData: Voyage[] = JSON.parse(voyagesData);
-      setAllVoyages(allVoyagesData);
-      
-      // Filter voyages based on user role
-      if (user?.role === 'admin') {
-        // Admin sees all voyages
-        setVoyages(allVoyagesData);
-      } else {
-        // Regular users only see their own voyages
-        const userVoyages = allVoyagesData.filter(
-          voyage => voyage.createdBy === user?.id
-        );
-        setVoyages(userVoyages);
-      }
+  useEffect(() => {
+    if (user) {
+      setIsAdmin(user.role === 'admin');
+      loadVoyages();
     }
-  } catch (error) {
-    console.error('Erreur lors du chargement des voyages:', error);
-  }
-};
+  }, [user]);
+
+  const loadVoyages = async () => {
+    try {
+      let query = supabase.from('voyages').select('*').order('created_at', { ascending: false });
+      
+      // Filter based on user role
+      if (user?.role !== 'admin') {
+        query = query.eq('agent_id', user?.id);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('Error loading voyages:', error);
+        Alert.alert('Erreur', 'Impossible de charger les voyages');
+        return;
+      }
+      
+      setVoyages(data || []);
+    } catch (error) {
+      console.error('Error loading voyages:', error);
+    }
+  };
 
   // Informations automatiques
   const dateActuelle = new Date().toLocaleDateString('fr-FR');
   const agence = 'ORIGINAL EXPRESS';
   const ville = 'Douala';
-  const agentNom = user?.name?.split(' ')[1] || 'System';
-  const agentPrenom = user?.name?.split(' ')[0] || 'User';
-  const agentEmail = user?.email || 'unknown@original-express.com';
 
   const handleInputChange = (field: string, value: string) => {
     setFormData({ ...formData, [field]: value });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!formData.nomChauffeur || !formData.numeroVehicule || !formData.numeroBordereau ||
         !formData.recetteBrute || !formData.retenue || !formData.nombrePlaces) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
       return;
     }
 
-    const nouveauVoyage: Voyage = {
-      id: Date.now().toString(),
-      nomChauffeur: formData.nomChauffeur,
-      numeroVehicule: formData.numeroVehicule,
-      numeroBordereau: formData.numeroBordereau,
-      recetteBrute: parseFloat(formData.recetteBrute),
-      retenue: parseFloat(formData.retenue),
-      nombrePlaces: parseInt(formData.nombrePlaces),
-      date: dateActuelle,
-      agence: agence,
-      ville: ville,
-      agentNom: agentNom,
-      agentPrenom: agentPrenom,
-      agentEmail: agentEmail,
-      createdBy: user?.id || 'unknown',
-      userRole: user?.role || 'user',
-    };
-
-    const updatedVoyages = [...allVoyages, nouveauVoyage];
-    setAllVoyages(updatedVoyages);
-    
-    // Filter voyages based on user role
-    if (user?.role === 'admin') {
-      setVoyages(updatedVoyages);
-    } else {
-      const userVoyages = updatedVoyages.filter(
-        voyage => voyage.createdBy === user?.id
-      );
-      setVoyages(userVoyages);
-    }
-    
-    // Save to AsyncStorage
-    saveVoyages(updatedVoyages);
-    
-    // Réinitialiser le formulaire
-    setFormData({
-      nomChauffeur: '',
-      numeroVehicule: '',
-      numeroBordereau: '',
-      recetteBrute: '',
-      retenue: '',
-      nombrePlaces: '',
-    });
-
-    Alert.alert('Succès', 'Voyage enregistré avec succès');
-  };
-
-  const saveVoyages = async (voyagesToSave: Voyage[]) => {
     try {
-      await AsyncStorage.setItem('voyages', JSON.stringify(voyagesToSave));
+      const { error } = await supabase.from('voyages').insert({
+        nom_chauffeur: formData.nomChauffeur,
+        numero_vehicule: formData.numeroVehicule,
+        numero_bordereau: formData.numeroBordereau,
+        recette_brute: parseFloat(formData.recetteBrute),
+        retenue: parseFloat(formData.retenue),
+        nombre_places: parseInt(formData.nombrePlaces),
+        date: new Date().toISOString().split('T')[0],
+        agence: agence,
+        ville: ville,
+        agent_id: user?.id,
+      });
+
+      if (error) {
+        console.error('Error saving voyage:', error);
+        Alert.alert('Erreur', 'Impossible d\'enregistrer le voyage');
+        return;
+      }
+
+      // Réinitialiser le formulaire
+      setFormData({
+        nomChauffeur: '',
+        numeroVehicule: '',
+        numeroBordereau: '',
+        recetteBrute: '',
+        retenue: '',
+        nombrePlaces: '',
+      });
+
+      Alert.alert('Succès', 'Voyage enregistré avec succès');
+      setShowForm(false);
+      loadVoyages(); // Recharger les voyages
     } catch (error) {
-      console.error('Erreur lors de la sauvegarde des voyages:', error);
+      console.error('Error saving voyage:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
     }
   };
 
-  const [showForm, setShowForm] = useState(false);
 
   const generateInventoryPDF = async () => {
     if (voyages.length === 0) {
@@ -163,6 +125,8 @@ const loadVoyages = async () => {
 
     try {
       const totalRecette = voyages.reduce((sum, voyage) => sum + voyage.recetteBrute, 0);
+      const totalRetenue = voyages.reduce((sum, voyage) => sum + voyage.retenue, 0);
+      const totalRecette = voyages.reduce((sum, voyage) => sum + voyage.recette_brute, 0);
       const totalRetenue = voyages.reduce((sum, voyage) => sum + voyage.retenue, 0);
       const totalNet = totalRecette - totalRetenue;
 
@@ -312,14 +276,14 @@ const loadVoyages = async () => {
               <tbody>
                 ${voyages.map(voyage => `
                   <tr>
-                    <td>${voyage.numeroBordereau}</td>
+                    <td>${voyage.numero_bordereau}</td>
                     <td>${voyage.date}</td>
-                    <td>${voyage.nomChauffeur}</td>
-                    <td>${voyage.numeroVehicule}</td>
-                    <td>${voyage.nombrePlaces}</td>
-                    <td>${voyage.recetteBrute.toLocaleString()} FCFA</td>
+                    <td>${voyage.nom_chauffeur}</td>
+                    <td>${voyage.numero_vehicule}</td>
+                    <td>${voyage.nombre_places}</td>
+                    <td>${voyage.recette_brute.toLocaleString()} FCFA</td>
                     <td>${voyage.retenue.toLocaleString()} FCFA</td>
-                    <td class="net-amount">${(voyage.recetteBrute - voyage.retenue).toLocaleString()} FCFA</td>
+                    <td class="net-amount">${(voyage.recette_brute - voyage.retenue).toLocaleString()} FCFA</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -443,21 +407,21 @@ const loadVoyages = async () => {
                   {group.voyages.map((voyage) => (
                     <View key={voyage.id} style={styles.voyageCard}>
                       <View style={styles.voyageHeader}>
-                        <Text style={styles.voyageTitle}>Voyage #{voyage.numeroBordereau}</Text>
+                        <Text style={styles.voyageTitle}>Voyage #{voyage.numero_bordereau}</Text>
                         <Text style={styles.voyageTime}>{new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</Text>
                       </View>
                       <View style={styles.voyageDetails}>
-                        <Text style={styles.voyageText}>Chauffeur: {voyage.nomChauffeur}</Text>
-                        <Text style={styles.voyageText}>Véhicule: {voyage.numeroVehicule}</Text>
-                        <Text style={styles.voyageText}>Places: {voyage.nombrePlaces}</Text>
-                        <Text style={styles.voyageText}>Recette: {voyage.recetteBrute.toLocaleString()} FCFA</Text>
+                        <Text style={styles.voyageText}>Chauffeur: {voyage.nom_chauffeur}</Text>
+                        <Text style={styles.voyageText}>Véhicule: {voyage.numero_vehicule}</Text>
+                        <Text style={styles.voyageText}>Places: {voyage.nombre_places}</Text>
+                        <Text style={styles.voyageText}>Recette: {voyage.recette_brute.toLocaleString()} FCFA</Text>
                         <Text style={styles.voyageText}>Retenue: {voyage.retenue.toLocaleString()} FCFA</Text>
                         <Text style={[styles.voyageText, styles.netAmount]}>
-                          Net: {(voyage.recetteBrute - voyage.retenue).toLocaleString()} FCFA
+                          Net: {(voyage.recette_brute - voyage.retenue).toLocaleString()} FCFA
                         </Text>
                       </View>
                     </View>
-                  ))}
+                  <Text style={styles.infoValue}>{user?.full_name}</Text>
                 </View>
               ))}
             </ScrollView>

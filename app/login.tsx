@@ -32,9 +32,9 @@ export default function LoginScreen() {
 
     const success = await login(email, password);
     if (success) {
-      router.replace('/dashboard');
+      router.replace('/(tabs)/dashboard');
     } else {
-      Alert.alert('Erreur', 'Email ou mot de passe incorrect');
+      Alert.alert('Erreur', 'Email ou mot de passe incorrect. Vérifiez vos identifiants.');
     }
   };
 

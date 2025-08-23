@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Text } from '@/components/Themed';
+import { useUser } from '@/app/contexts/UserContext';
 
 const AGENCES = [
   'Maroua',
@@ -26,8 +27,8 @@ const AGENCES = [
 ];
 
 const ROLES = [
-  'Chef d\'agence',
-  'Agent comptable',
+  'chef_agence',
+  'agent_comptable',
 ];
 
 export default function SignUpScreen() {
@@ -38,7 +39,7 @@ export default function SignUpScreen() {
   const [agency, setAgency] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const { signup, isLoading } = useUser();
   const router = useRouter();
 
   const handleSignUp = async () => {
@@ -62,17 +63,17 @@ export default function SignUpScreen() {
       return;
     }
 
-    setIsLoading(true);
-
-    // Simulation d'inscription - à remplacer par votre logique
-    setTimeout(() => {
-      setIsLoading(false);
+    const success = await signup(email, password, fullName, role, phone, agency);
+    
+    if (success) {
       Alert.alert(
         'Succès',
-        'Compte créé avec succès !',
+        'Compte créé avec succès ! Veuillez vérifier votre email pour confirmer votre compte.',
         [{ text: 'OK', onPress: () => router.replace('/login') }]
       );
-    }, 1500);
+    } else {
+      Alert.alert('Erreur', 'Impossible de créer le compte. Veuillez réessayer.');
+    }
   };
 
   const handleLogin = () => {
@@ -134,7 +135,7 @@ export default function SignUpScreen() {
                     styles.pickerItemText,
                     role === r && styles.pickerItemTextSelected
                   ]}>
-                    {r}
+                    {r === 'chef_agence' ? 'Chef d\'agence' : 'Agent comptable'}
                   </Text>
                 </TouchableOpacity>
               ))}
