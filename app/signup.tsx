@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   TextInput,
@@ -12,23 +12,11 @@ import {
 import { useRouter } from 'expo-router';
 import { Text } from '@/components/Themed';
 import { useUser } from '@/app/contexts/UserContext';
-
-const AGENCES = [
-  'Maroua',
-  'Yaoundé',
-  'Douala',
-  'Kribi',
-  'Bafoussam',
-  'Bamenda',
-  'Garoua',
-  'Ngaoundéré',
-  'Ebolowa',
-  'Bertoua',
-];
+import { getAgencies, Agency } from '@/lib/supabase';
 
 const ROLES = [
-  'chef_agence',
-  'agent_comptable',
+  { value: 'chef_agence', label: 'Chef d\'agence' },
+  { value: 'agent_comptable', label: 'Agent comptable' },
 ];
 
 export default function SignUpScreen() {
@@ -39,8 +27,22 @@ export default function SignUpScreen() {
   const [agency, setAgency] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [agencies, setAgencies] = useState<Agency[]>([]);
   const { signup, isLoading } = useUser();
   const router = useRouter();
+
+  useEffect(() => {
+    loadAgencies();
+  }, []);
+
+  const loadAgencies = async () => {
+    try {
+      const agenciesData = await getAgencies();
+      setAgencies(agenciesData);
+    } catch (error) {
+      console.error('Error loading agencies:', error);
+    }
+  };
 
   const handleSignUp = async () => {
     if (!fullName || !email || !role || !phone || !agency || !password || !confirmPassword) {
@@ -68,16 +70,21 @@ export default function SignUpScreen() {
     if (success) {
       Alert.alert(
         'Succès',
-        'Compte créé avec succès ! Veuillez vérifier votre email pour confirmer votre compte.',
+        'Compte créé avec succès ! Veuillez vérifier votre email pour confirmer votre compte avant de vous connecter.',
         [{ text: 'OK', onPress: () => router.replace('/login') }]
       );
     } else {
-      Alert.alert('Erreur', 'Impossible de créer le compte. Veuillez réessayer.');
+      Alert.alert('Erreur', 'Impossible de créer le compte. Cet email est peut-être déjà utilisé.');
     }
   };
 
   const handleLogin = () => {
     router.replace('/login');
+  };
+
+  const getRoleLabel = (roleValue: string) => {
+    const role = ROLES.find(r => r.value === roleValue);
+    return role ? role.label : roleValue;
   };
 
   return (
@@ -124,18 +131,18 @@ export default function SignUpScreen() {
             <View style={styles.pickerWrapper}>
               {ROLES.map((r) => (
                 <TouchableOpacity
-                  key={r}
+                  key={r.value}
                   style={[
                     styles.pickerItem,
-                    role === r && styles.pickerItemSelected
+                    role === r.value && styles.pickerItemSelected
                   ]}
-                  onPress={() => setRole(r)}
+                  onPress={() => setRole(r.value)}
                 >
                   <Text style={[
                     styles.pickerItemText,
-                    role === r && styles.pickerItemTextSelected
+                    role === r.value && styles.pickerItemTextSelected
                   ]}>
-                    {r === 'chef_agence' ? 'Chef d\'agence' : 'Agent comptable'}
+                    {r.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -157,20 +164,20 @@ export default function SignUpScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Agence</Text>
             <View style={styles.pickerWrapper}>
-              {AGENCES.map((a) => (
+              {agencies.map((a) => (
                 <TouchableOpacity
-                  key={a}
+                  key={a.id}
                   style={[
                     styles.pickerItem,
-                    agency === a && styles.pickerItemSelected
+                    agency === a.id && styles.pickerItemSelected
                   ]}
-                  onPress={() => setAgency(a)}
+                  onPress={() => setAgency(a.id)}
                 >
                   <Text style={[
                     styles.pickerItemText,
-                    agency === a && styles.pickerItemTextSelected
+                    agency === a.id && styles.pickerItemTextSelected
                   ]}>
-                    {a}
+                    {a.name}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -181,7 +188,7 @@ export default function SignUpScreen() {
             <Text style={styles.label}>Mot de passe</Text>
             <TextInput
               style={styles.input}
-              placeholder="Entrez votre mot de passe"
+              placeholder="Entrez votre mot de passe (min. 6 caractères)"
               value={password}
               onChangeText={setPassword}
               secureTextEntry

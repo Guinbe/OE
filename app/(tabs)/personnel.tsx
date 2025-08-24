@@ -9,34 +9,21 @@ import {
   Alert,
   Modal,
   SafeAreaView,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../contexts/UserContext';
-import { supabase, Personnel } from '@/lib/supabase';
-
-const AGENCES = [
-  'Maroua',
-  'Yaoundé',
-  'Douala',
-  'Kribi',
-  'Bafoussam',
-  'Bamenda',
-  'Garoua',
-  'Ngaoundéré',
-  'Ebolowa',
-  'Bertoua',
-];
+import { supabase, User, getAgencies, Agency } from '@/lib/supabase';
 
 const ROLES = [
-  'Chef d\'agence',
-  'Agent comptable'
+  { value: 'chef_agence', label: 'Chef d\'agence' },
+  { value: 'agent_comptable', label: 'Agent comptable' }
 ];
 
 const PersonnelScreen = () => {
   const { user } = useUser();
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [personnel, setPersonnel] = useState<Personnel[]>([]);
-
+  const [personnel, setPersonnel] = useState<User[]>([]);
+  const [agencies, setAgencies] = useState<Agency[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
   const [modalVisible, setModalVisible] = useState(false);
@@ -46,22 +33,36 @@ const PersonnelScreen = () => {
     phone: '',
     role: '',
     agency: '',
+    password: '',
   });
 
+  const isAdmin = user?.role === 'admin';
+
   useEffect(() => {
-    if (user?.role === 'admin') {
-      setIsAdmin(true);
+    if (isAdmin) {
       loadPersonnel();
-    } else {
-      setIsAdmin(false);
+      loadAgencies();
     }
-  }, [user]);
+  }, [isAdmin]);
+
+  const loadAgencies = async () => {
+    try {
+      const agenciesData = await getAgencies();
+      setAgencies(agenciesData);
+    } catch (error) {
+      console.error('Error loading agencies:', error);
+    }
+  };
 
   const loadPersonnel = async () => {
     try {
       const { data, error } = await supabase
-        .from('personnel')
-        .select('*')
+        .from('users')
+        .select(`
+          *,
+          agency_info:agencies(name, address)
+        `)
+        .neq('role', 'admin')
         .order('created_at', { ascending: false });
       
       if (error) {
@@ -80,8 +81,7 @@ const PersonnelScreen = () => {
       const matchesSearch =
         person.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         person.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        person.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        person.agency.toLowerCase().includes(searchQuery.toLowerCase());
+        person.role.toLowerCase().includes(searchQuery.toLowerCase());
       
       const matchesStatus = statusFilter === 'all' || person.status === statusFilter;
       
@@ -92,38 +92,72 @@ const PersonnelScreen = () => {
   const pendingPersonnelCount = personnel.filter(p => p.status === 'pending').length;
 
   const handleAddPersonnel = async () => {
-    if (!newPersonnel.full_name || !newPersonnel.email || !newPersonnel.phone || !newPersonnel.role || !newPersonnel.agency) {
+    if (!newPersonnel.full_name || !newPersonnel.email || !newPersonnel.phone || 
+        !newPersonnel.role || !newPersonnel.agency || !newPersonnel.password) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('personnel')
-        .insert({
-          ...newPersonnel,
-          join_date: new Date().toISOString().split('T')[0],
-        });
-      
-      if (error) {
-        console.error('Error adding personnel:', error);
-        Alert.alert('Erreur', 'Impossible d\'ajouter le personnel');
+      // Créer l'utilisateur dans Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newPersonnel.email,
+        password: newPersonnel.password,
+        options: {
+          data: {
+            full_name: newPersonnel.full_name,
+          }
+        }
+      });
+
+      if (authError) {
+        console.error('Error creating auth user:', authError);
+        Alert.alert('Erreur', 'Impossible de créer le compte utilisateur');
         return;
       }
+
+      if (authData.user) {
+        // Créer le profil dans la table users
+        const { error: profileError } = await supabase
+          .from('users')
+          .insert({
+            id: authData.user.id,
+            email: newPersonnel.email,
+            full_name: newPersonnel.full_name,
+            role: newPersonnel.role as 'agent_comptable' | 'chef_agence',
+            phone: newPersonnel.phone,
+            agency: newPersonnel.agency,
+            status: 'pending',
+            join_date: new Date().toISOString().split('T')[0],
+          });
+
+        if (profileError) {
+          console.error('Error creating profile:', profileError);
+          Alert.alert('Erreur', 'Impossible de créer le profil utilisateur');
+          return;
+        }
+      }
       
-      setNewPersonnel({ full_name: '', email: '', phone: '', role: '', agency: '' });
+      setNewPersonnel({ 
+        full_name: '', 
+        email: '', 
+        phone: '', 
+        role: '', 
+        agency: '',
+        password: ''
+      });
       setModalVisible(false);
       loadPersonnel();
       
-      Alert.alert('Succès', 'Le personnel a été ajouté avec succès.');
+      Alert.alert('Succès', 'Le personnel a été ajouté avec succès. Un email de vérification a été envoyé.');
     } catch (error) {
       console.error('Error adding personnel:', error);
       Alert.alert('Erreur', 'Une erreur est survenue');
     }
   };
 
-  const handleToggleStatus = (id: string) => {
-    const person = personnel.find(p => p.id === id);
+  const handleToggleStatus = async (userId: string) => {
+    const person = personnel.find(p => p.id === userId);
     if (!person) return;
     
     let newStatus: 'active' | 'inactive' | 'pending';
@@ -135,21 +169,25 @@ const PersonnelScreen = () => {
       newStatus = 'active';
     }
     
-    supabase
-      .from('personnel')
-      .update({ status: newStatus })
-      .eq('id', id)
-      .then(({ error }) => {
-        if (error) {
-          console.error('Error updating personnel status:', error);
-          Alert.alert('Erreur', 'Impossible de modifier le statut');
-        } else {
-          loadPersonnel();
-        }
-      });
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ status: newStatus })
+        .eq('id', userId);
+        
+      if (error) {
+        console.error('Error updating user status:', error);
+        Alert.alert('Erreur', 'Impossible de modifier le statut');
+      } else {
+        loadPersonnel();
+      }
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
+    }
   };
 
-  const handleDeletePersonnel = (id: string) => {
+  const handleDeletePersonnel = (userId: string) => {
     Alert.alert(
       'Confirmer la suppression',
       'Êtes-vous sûr de vouloir supprimer ce personnel ?',
@@ -161,9 +199,9 @@ const PersonnelScreen = () => {
           onPress: async () => {
             try {
               const { error } = await supabase
-                .from('personnel')
+                .from('users')
                 .delete()
-                .eq('id', id);
+                .eq('id', userId);
               
               if (error) {
                 console.error('Error deleting personnel:', error);
@@ -182,7 +220,17 @@ const PersonnelScreen = () => {
     );
   };
 
-  const renderPersonnelItem = ({ item }: { item: Personnel }) => (
+  const getAgencyName = (agencyId: string) => {
+    const agency = agencies.find(a => a.id === agencyId);
+    return agency ? agency.name : 'Agence inconnue';
+  };
+
+  const getRoleLabel = (role: string) => {
+    const roleObj = ROLES.find(r => r.value === role);
+    return roleObj ? roleObj.label : role;
+  };
+
+  const renderPersonnelItem = ({ item }: { item: User }) => (
     <View style={styles.personnelCard}>
       <View style={styles.personnelInfo}>
         <View style={styles.avatar}>
@@ -192,8 +240,10 @@ const PersonnelScreen = () => {
           <Text style={styles.personnelName}>{item.full_name}</Text>
           <Text style={styles.personnelEmail}>{item.email}</Text>
           <Text style={styles.personnelPhone}>{item.phone}</Text>
-          <Text style={styles.personnelRole}>{item.role}</Text>
-          <Text style={styles.personnelAgency}>{item.agency}</Text>
+          <Text style={styles.personnelRole}>{getRoleLabel(item.role)}</Text>
+          <Text style={styles.personnelAgency}>
+            {item.agency ? getAgencyName(item.agency) : 'Aucune agence'}
+          </Text>
         </View>
       </View>
       {isAdmin && (
@@ -224,6 +274,21 @@ const PersonnelScreen = () => {
     </View>
   );
 
+  if (!isAdmin) {
+    return (
+      <View style={styles.accessDeniedContainer}>
+        <Ionicons name="lock-closed" size={64} color="#dc3545" />
+        <Text style={styles.accessDeniedTitle}>Accès Restreint</Text>
+        <Text style={styles.accessDeniedText}>
+          Cette section est réservée aux administrateurs uniquement.
+        </Text>
+        <Text style={styles.accessDeniedSubtext}>
+          Veuillez contacter votre administrateur pour obtenir l'accès.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -241,85 +306,67 @@ const PersonnelScreen = () => {
         />
       </View>
 
-      {isAdmin && (
-        <View style={styles.filterContainer}>
-          <Text style={styles.filterLabel}>Trier par statut:</Text>
-          <View style={styles.filterButtons}>
-            <TouchableOpacity
-              style={[styles.filterButton, statusFilter === 'all' && styles.activeFilter]}
-              onPress={() => setStatusFilter('all')}
-            >
-              <Text style={[styles.filterButtonText, statusFilter === 'all' && styles.activeFilterText]}>
-                Tous
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterButton, statusFilter === 'active' && styles.activeFilter]}
-              onPress={() => setStatusFilter('active')}
-            >
-              <Text style={[styles.filterButtonText, statusFilter === 'active' && styles.activeFilterText]}>
-                Actifs
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterButton, statusFilter === 'inactive' && styles.activeFilter]}
-              onPress={() => setStatusFilter('inactive')}
-            >
-              <Text style={[styles.filterButtonText, statusFilter === 'inactive' && styles.activeFilterText]}>
-                Inactifs
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.filterButton, statusFilter === 'pending' && styles.activeFilter]}
-              onPress={() => setStatusFilter('pending')}
-            >
-              <Text style={[styles.filterButtonText, statusFilter === 'pending' && styles.activeFilterText]}>
-                En attente
-              </Text>
-            </TouchableOpacity>
-          </View>
+      <View style={styles.filterContainer}>
+        <Text style={styles.filterLabel}>Trier par statut:</Text>
+        <View style={styles.filterButtons}>
+          <TouchableOpacity
+            style={[styles.filterButton, statusFilter === 'all' && styles.activeFilter]}
+            onPress={() => setStatusFilter('all')}
+          >
+            <Text style={[styles.filterButtonText, statusFilter === 'all' && styles.activeFilterText]}>
+              Tous
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, statusFilter === 'active' && styles.activeFilter]}
+            onPress={() => setStatusFilter('active')}
+          >
+            <Text style={[styles.filterButtonText, statusFilter === 'active' && styles.activeFilterText]}>
+              Actifs
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, statusFilter === 'inactive' && styles.activeFilter]}
+            onPress={() => setStatusFilter('inactive')}
+          >
+            <Text style={[styles.filterButtonText, statusFilter === 'inactive' && styles.activeFilterText]}>
+              Inactifs
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, statusFilter === 'pending' && styles.activeFilter]}
+            onPress={() => setStatusFilter('pending')}
+          >
+            <Text style={[styles.filterButtonText, statusFilter === 'pending' && styles.activeFilterText]}>
+              En attente
+            </Text>
+          </TouchableOpacity>
         </View>
-      )}
+      </View>
 
-      {isAdmin ? (
-        <>
-          {pendingPersonnelCount > 0 && (
-            <View style={styles.pendingBanner}>
-              <Ionicons name="warning" size={20} color="#FF9800" />
-              <Text style={styles.pendingText}>
-                {pendingPersonnelCount} personnel en attente de validation
-              </Text>
-            </View>
-          )}
-          <FlatList
-            data={filteredPersonnel}
-            renderItem={renderPersonnelItem}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
-          />
-        </>
-      ) : (
-        <View style={styles.accessDeniedContainer}>
-          <Ionicons name="lock-closed" size={64} color="#dc3545" />
-          <Text style={styles.accessDeniedTitle}>Accès Restreint</Text>
-          <Text style={styles.accessDeniedText}>
-            Cette section est réservée aux administrateurs uniquement.
-          </Text>
-          <Text style={styles.accessDeniedSubtext}>
-            Veuillez contacter votre administrateur pour obtenir l'accès.
+      {pendingPersonnelCount > 0 && (
+        <View style={styles.pendingBanner}>
+          <Ionicons name="warning" size={20} color="#FF9800" />
+          <Text style={styles.pendingText}>
+            {pendingPersonnelCount} personnel en attente de validation
           </Text>
         </View>
       )}
 
-      {isAdmin && (
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setModalVisible(true)}
-        >
-          <Ionicons name="add" size={24} color="#fff" />
-        </TouchableOpacity>
-      )}
+      <FlatList
+        data={filteredPersonnel}
+        renderItem={renderPersonnelItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+      />
+
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => setModalVisible(true)}
+      >
+        <Ionicons name="add" size={24} color="#fff" />
+      </TouchableOpacity>
 
       <Modal
         animationType="slide"
@@ -329,88 +376,98 @@ const PersonnelScreen = () => {
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Ajouter un employé</Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Nom complet"
-              value={newPersonnel.full_name}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, full_name: text })}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              keyboardType="email-address"
-              value={newPersonnel.email}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, email: text })}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Téléphone"
-              keyboardType="phone-pad"
-              value={newPersonnel.phone}
-              onChangeText={(text) => setNewPersonnel({ ...newPersonnel, phone: text })}
-            />
-            
-            <View style={styles.pickerContainer}>
-              <Text style={styles.pickerLabel}>Poste</Text>
-              <View style={styles.pickerWrapper}>
-                {ROLES.map((role) => (
-                  <TouchableOpacity
-                    key={role}
-                    style={[
-                      styles.roleOption,
-                      newPersonnel.role === role && styles.selectedRole
-                    ]}
-                    onPress={() => setNewPersonnel({ ...newPersonnel, role })}
-                  >
-                    <Text style={[
-                      styles.roleText,
-                      newPersonnel.role === role && styles.selectedRoleText
-                    ]}>{role}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.pickerContainer}>
-              <Text style={styles.pickerLabel}>Agence</Text>
-              <View style={styles.pickerWrapper}>
-                {AGENCES.map((agency) => (
-                  <TouchableOpacity
-                    key={agency}
-                    style={[
-                      styles.agencyOption,
-                      newPersonnel.agency === agency && styles.selectedAgency
-                    ]}
-                    onPress={() => setNewPersonnel({ ...newPersonnel, agency })}
-                  >
-                    <Text style={[
-                      styles.agencyText,
-                      newPersonnel.agency === agency && styles.selectedAgencyText
-                    ]}>{agency}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Annuler</Text>
-              </TouchableOpacity>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>Ajouter un employé</Text>
               
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleAddPersonnel}
-              >
-                <Text style={styles.saveButtonText}>Ajouter</Text>
-              </TouchableOpacity>
-            </View>
+              <TextInput
+                style={styles.input}
+                placeholder="Nom complet"
+                value={newPersonnel.full_name}
+                onChangeText={(text) => setNewPersonnel({ ...newPersonnel, full_name: text })}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                keyboardType="email-address"
+                value={newPersonnel.email}
+                onChangeText={(text) => setNewPersonnel({ ...newPersonnel, email: text })}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Téléphone"
+                keyboardType="phone-pad"
+                value={newPersonnel.phone}
+                onChangeText={(text) => setNewPersonnel({ ...newPersonnel, phone: text })}
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="Mot de passe temporaire"
+                secureTextEntry
+                value={newPersonnel.password}
+                onChangeText={(text) => setNewPersonnel({ ...newPersonnel, password: text })}
+              />
+              
+              <View style={styles.pickerContainer}>
+                <Text style={styles.pickerLabel}>Poste</Text>
+                <View style={styles.pickerWrapper}>
+                  {ROLES.map((role) => (
+                    <TouchableOpacity
+                      key={role.value}
+                      style={[
+                        styles.roleOption,
+                        newPersonnel.role === role.value && styles.selectedRole
+                      ]}
+                      onPress={() => setNewPersonnel({ ...newPersonnel, role: role.value })}
+                    >
+                      <Text style={[
+                        styles.roleText,
+                        newPersonnel.role === role.value && styles.selectedRoleText
+                      ]}>{role.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.pickerContainer}>
+                <Text style={styles.pickerLabel}>Agence</Text>
+                <View style={styles.pickerWrapper}>
+                  {agencies.map((agency) => (
+                    <TouchableOpacity
+                      key={agency.id}
+                      style={[
+                        styles.agencyOption,
+                        newPersonnel.agency === agency.id && styles.selectedAgency
+                      ]}
+                      onPress={() => setNewPersonnel({ ...newPersonnel, agency: agency.id })}
+                    >
+                      <Text style={[
+                        styles.agencyText,
+                        newPersonnel.agency === agency.id && styles.selectedAgencyText
+                      ]}>{agency.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Annuler</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleAddPersonnel}
+                >
+                  <Text style={styles.saveButtonText}>Ajouter</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -570,6 +627,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 20,
+    maxHeight: '90%',
   },
   modalTitle: {
     fontSize: 20,

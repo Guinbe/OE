@@ -56,7 +56,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('*')
+        .select(`
+          *,
+          agency_info:agencies(name, address)
+        `)
         .eq('id', userId)
         .single();
 
@@ -105,19 +108,20 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fullName: string, 
     role: string, 
     phone?: string, 
-    agency?: string
+    agencyId?: string
   ): Promise<boolean> => {
     setIsLoading(true);
     
     try {
-      // Créer l'utilisateur dans Supabase Auth
+      // Créer l'utilisateur dans Supabase Auth avec vérification d'email
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
             full_name: fullName,
-          }
+          },
+          emailRedirectTo: undefined, // Pas de redirection automatique
         }
       });
 
@@ -137,7 +141,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             full_name: fullName,
             role: role as 'admin' | 'agent_comptable' | 'chef_agence',
             phone,
-            agency,
+            agency: agencyId, // UUID de l'agence
+            status: 'pending', // En attente par défaut
+            join_date: new Date().toISOString().split('T')[0],
           });
 
         if (profileError) {
