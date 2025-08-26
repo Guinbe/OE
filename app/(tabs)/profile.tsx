@@ -11,7 +11,7 @@ import {
   Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 
 export default function ProfileScreen() {
   const router = useRouter();

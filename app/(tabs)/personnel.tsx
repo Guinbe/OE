@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 import { supabase, User, getAgencies, Agency } from '@/lib/supabase';
 
 const ROLES = [

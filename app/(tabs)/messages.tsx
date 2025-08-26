@@ -11,12 +11,13 @@ import {
   SafeAreaView,
   Image,
   ScrollView,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 import { supabase, Message, ChatGroup, GroupMember, User, uploadFile } from '@/lib/supabase';
 
 interface GroupWithMembers extends ChatGroup {
@@ -38,6 +39,8 @@ const MessagesScreen = () => {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -55,6 +58,125 @@ const MessagesScreen = () => {
       };
     }
   }, [selectedGroup]);
+
+  // Dans le composant MessagesScreen
+  const handleFileMessagePress = async (message: Message) => {
+    if (!message.file_url) return;
+
+    // Générer une URL signée et temporaire pour le fichier
+    const { data, error } = await supabase.storage
+      .from('message-files')
+      .createSignedUrl(message.file_url, 60); // URL valide pendant 60 secondes
+
+    if (error || !data) {
+      Alert.alert('Erreur', 'Impossible de récupérer le fichier.');
+      console.error('Error creating signed URL:', error);
+      return;
+    }
+
+    const signedUrl = data.signedUrl;
+
+    // Logique pour les messages vocaux
+    if (message.message_type === 'voice') {
+      try {
+        if (sound) {
+          await sound.unloadAsync(); // Décharger le son précédent
+          if (playingMessageId === message.id) {
+            setPlayingMessageId(null); // Arrêter la lecture si on clique à nouveau
+            return;
+          }
+        }
+
+        const { sound: newSound } = await Audio.Sound.createAsync({ uri: signedUrl });
+        setSound(newSound);
+        setPlayingMessageId(message.id);
+        await newSound.playAsync();
+
+        // Mettre à jour l'état quand le son est terminé
+        newSound.setOnPlaybackStatusUpdate((status) => {
+          if (status.isLoaded && status.didJustFinish) {
+            setPlayingMessageId(null);
+          }
+        });
+      } catch (e) {
+        console.error('Error playing sound:', e);
+        Alert.alert('Erreur', 'Impossible de lire le message vocal.');
+      }
+    }
+    // Logique pour les documents (utilise expo-linking pour ouvrir le navigateur)
+    else if (message.message_type === 'file') {
+      try {
+        const { Linking } = require('react-native');
+        const supported = await Linking.canOpenURL(signedUrl);
+        if (supported) {
+          await Linking.openURL(signedUrl);
+        } else {
+          Alert.alert('Erreur', "Impossible d'ouvrir ce lien.");
+        }
+      } catch (e) {
+        console.error('Error opening link:', e);
+      }
+    }
+  };
+
+  // Sous-composant pour gérer le contenu asynchrone (images, etc.)
+  const MessageContent = ({ message }: { message: Message }) => {
+    const [fileUrl, setFileUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+      // Générer l'URL signée pour les images
+      if (message.message_type === 'image' && message.file_url) {
+        supabase.storage
+          .from('message-files')
+          .createSignedUrl(message.file_url, 3600) // Valide 1 heure
+          // .then(({ data }) => {
+          //   if (data) {
+          //     setFileUrl(data.signedUrl);
+          //   }
+          // });
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error creating signed URL in component:', error.message);
+              return;
+            }
+            if (data) {
+              setFileUrl(data.signedUrl);
+            }
+          });
+      }
+    }, [message]);
+
+    if (message.message_type === 'text') {
+      return <Text style={styles.messageText}>{message.content}</Text>;
+    }
+
+    if (message.message_type === 'image') {
+      return fileUrl ? (
+        <View>
+          <Image source={{ uri: fileUrl }} style={styles.messageImage} />
+          <Text style={styles.messageText}>{message.content}</Text>
+        </View>
+      ) : (
+        <View style={styles.imagePlaceholder}>
+          <Ionicons name="image-outline" size={50} color="#ccc" />
+        </View>
+      );
+    }
+
+    // Pour les fichiers et vocaux, on rend un bouton
+    if (message.message_type === 'file' || message.message_type === 'voice') {
+      const iconName = message.message_type === 'file' ? 'document' : 'mic';
+      return (
+        <View style={styles.fileMessage}>
+          <Ionicons name={iconName} size={20} color="#007bff" />
+          <Text style={styles.messageText}>{message.content}</Text>
+        </View>
+      );
+    }
+
+    return null;
+  };
+  //-- fin
 
   const loadGroups = async () => {
     try {
@@ -132,7 +254,7 @@ const MessagesScreen = () => {
         .from('messages')
         .select(`
           *,
-          sender:users(full_name, email)
+          sender:users!messages_sender_id_fkey(full_name, email)
         `)
         .eq('group_id', selectedGroup.id)
         .order('created_at', { ascending: true });
@@ -197,7 +319,8 @@ const MessagesScreen = () => {
   const handleImagePicker = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        // mediaTypes: ImagePicker.MediaType.Image,
+        mediaTypes: 'Images',
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -301,7 +424,7 @@ const MessagesScreen = () => {
         const fileName = `voice_${Date.now()}.m4a`;
         
         // Upload vers Supabase Storage
-        const fileUrl = await uploadFile({ uri }, fileName);
+        const fileUrl = await uploadFile({ uri, mimeType: 'audio/mp4' }, fileName);
         
         if (fileUrl) {
           await supabase
@@ -412,50 +535,81 @@ const MessagesScreen = () => {
     </TouchableOpacity>
   );
 
+  // const renderMessage = ({ item }: { item: Message }) => {
+  //   const isOwnMessage = item.sender_id === user?.id;
+    
+  //   return (
+  //     <View style={[
+  //       styles.messageContainer,
+  //       isOwnMessage ? styles.ownMessage : styles.otherMessage
+  //     ]}>
+  //       {!isOwnMessage && (
+  //         <Text style={styles.senderName}>{item.sender?.full_name}</Text>
+  //       )}
+        
+  //       {item.message_type === 'text' && (
+  //         <Text style={styles.messageText}>{item.content}</Text>
+  //       )}
+        
+  //       {item.message_type === 'image' && (
+  //         <View>
+  //           <Image source={{ uri: item.file_url }} style={styles.messageImage} />
+  //           <Text style={styles.messageText}>{item.content}</Text>
+  //         </View>
+  //       )}
+        
+  //       {item.message_type === 'file' && (
+  //         <View style={styles.fileMessage}>
+  //           <Ionicons name="document" size={20} color="#007bff" />
+  //           <Text style={styles.messageText}>{item.content}</Text>
+  //         </View>
+  //       )}
+        
+  //       {item.message_type === 'voice' && (
+  //         <View style={styles.voiceMessage}>
+  //           <Ionicons name="mic" size={20} color="#007bff" />
+  //           <Text style={styles.messageText}>{item.content}</Text>
+  //         </View>
+  //       )}
+        
+  //       <Text style={styles.messageTime}>
+  //         {new Date(item.created_at).toLocaleTimeString('fr-FR', {
+  //           hour: '2-digit',
+  //           minute: '2-digit'
+  //         })}
+  //       </Text>
+  //     </View>
+  //   );
+  // };
+  // Dans le composant MessagesScreen
   const renderMessage = ({ item }: { item: Message }) => {
     const isOwnMessage = item.sender_id === user?.id;
-    
+
+    const isClickable = item.message_type === 'file' || item.message_type === 'voice';
+
     return (
-      <View style={[
-        styles.messageContainer,
-        isOwnMessage ? styles.ownMessage : styles.otherMessage
-      ]}>
-        {!isOwnMessage && (
-          <Text style={styles.senderName}>{item.sender?.full_name}</Text>
-        )}
-        
-        {item.message_type === 'text' && (
-          <Text style={styles.messageText}>{item.content}</Text>
-        )}
-        
-        {item.message_type === 'image' && (
-          <View>
-            <Image source={{ uri: item.file_url }} style={styles.messageImage} />
-            <Text style={styles.messageText}>{item.content}</Text>
-          </View>
-        )}
-        
-        {item.message_type === 'file' && (
-          <View style={styles.fileMessage}>
-            <Ionicons name="document" size={20} color="#007bff" />
-            <Text style={styles.messageText}>{item.content}</Text>
-          </View>
-        )}
-        
-        {item.message_type === 'voice' && (
-          <View style={styles.voiceMessage}>
-            <Ionicons name="mic" size={20} color="#007bff" />
-            <Text style={styles.messageText}>{item.content}</Text>
-          </View>
-        )}
-        
-        <Text style={styles.messageTime}>
-          {new Date(item.created_at).toLocaleTimeString('fr-FR', {
-            hour: '2-digit',
-            minute: '2-digit'
-          })}
-        </Text>
-      </View>
+      <TouchableOpacity
+        disabled={!isClickable}
+        onPress={() => handleFileMessagePress(item)}
+      >
+        <View style={[
+          styles.messageContainer,
+          isOwnMessage ? styles.ownMessage : styles.otherMessage
+        ]}>
+          {!isOwnMessage && (
+            <Text style={styles.senderName}>{item.sender?.full_name}</Text>
+          )}
+
+          <MessageContent message={item} />
+
+          <Text style={styles.messageTime}>
+            {new Date(item.created_at).toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+          </Text>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -747,7 +901,7 @@ const styles = StyleSheet.create({
   },
   chatHeader: {
     backgroundColor: '#007bff',
-    padding: 16,
+    padding: 40,
     flexDirection: 'row',
     alignItems: 'center',
   },

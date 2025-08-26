@@ -10,7 +10,7 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 import { supabase, Agency } from '@/lib/supabase';
 
 

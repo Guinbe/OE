@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 import { supabase, Voyage, getAgencies, Agency } from '@/lib/supabase';
 
 const InventoryScreen = () => {
@@ -31,7 +31,7 @@ const InventoryScreen = () => {
     retenue: '',
     nombre_places: '',
     date: new Date().toISOString().split('T')[0],
-    agence: '',
+    agency: '', // <-- NOUVEAU NOM
     ville: '',
   });
 
@@ -87,7 +87,7 @@ const InventoryScreen = () => {
 
   const handleAddVoyage = async () => {
     if (!newVoyage.nom_chauffeur || !newVoyage.numero_vehicule || !newVoyage.numero_bordereau || 
-        !newVoyage.recette_brute || !newVoyage.nombre_places || !newVoyage.agence || !newVoyage.ville) {
+        !newVoyage.recette_brute || !newVoyage.nombre_places || !newVoyage.agency || !newVoyage.ville) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
       return;
     }
@@ -121,7 +121,7 @@ const InventoryScreen = () => {
         retenue: '',
         nombre_places: '',
         date: new Date().toISOString().split('T')[0],
-        agence: '',
+        agency: '',
         ville: '',
       });
       setModalVisible(false);
@@ -212,7 +212,7 @@ const InventoryScreen = () => {
                     <td>${voyage.nom_chauffeur}</td>
                     <td>${voyage.numero_vehicule}</td>
                     <td>${voyage.numero_bordereau}</td>
-                    <td>${getAgencyName(voyage.agence)}</td>
+                    <td>${getAgencyName(voyage.agency)}</td>
                     <td>${voyage.ville}</td>
                     <td>${voyage.nombre_places}</td>
                     <td>${voyage.recette_brute.toLocaleString()} FCFA</td>
@@ -260,7 +260,7 @@ const InventoryScreen = () => {
       <View style={styles.voyageDetails}>
         <Text style={styles.voyageInfo}>🚗 {item.numero_vehicule} - {item.nom_chauffeur}</Text>
         <Text style={styles.voyageInfo}>📋 Bordereau: {item.numero_bordereau}</Text>
-        <Text style={styles.voyageInfo}>🏢 {getAgencyName(item.agence)}</Text>
+        <Text style={styles.voyageInfo}>🏢 {getAgencyName(item.agency)}</Text>
         <Text style={styles.voyageInfo}>📍 {item.ville}</Text>
         <Text style={styles.voyageInfo}>👥 {item.nombre_places} places</Text>
         {item.retenue > 0 && (
@@ -385,13 +385,13 @@ const InventoryScreen = () => {
                       key={agency.id}
                       style={[
                         styles.agencyOption,
-                        newVoyage.agence === agency.id && styles.selectedAgency
+                        newVoyage.agency === agency.id && styles.selectedAgency
                       ]}
-                      onPress={() => setNewVoyage({ ...newVoyage, agence: agency.id })}
+                      onPress={() => setNewVoyage({ ...newVoyage, agency: agency.id })}
                     >
                       <Text style={[
                         styles.agencyText,
-                        newVoyage.agence === agency.id && styles.selectedAgencyText
+                        newVoyage.agency === agency.id && styles.selectedAgencyText
                       ]}>{agency.name}</Text>
                     </TouchableOpacity>
                   ))}

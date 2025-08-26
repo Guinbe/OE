@@ -16,7 +16,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { useUser } from '../contexts/UserContext';
+import { useUser } from '../../contexts/UserContext';
 import { supabase, Voyage } from '@/lib/supabase';
 
 const StatisticsScreen = () => {

@@ -36,7 +36,7 @@ export interface Voyage {
   retenue: number;
   nombre_places: number;
   date: string;
-  agence: string; // UUID référençant agencies.id
+  agency: string; // UUID référençant agencies.id
   ville: string;
   agent_id: string; // UUID référençant users.id
   created_at: string;
@@ -83,23 +83,91 @@ export interface GroupMember {
 }
 
 // Fonction utilitaire pour uploader des fichiers vers Supabase Storage
-export const uploadFile = async (file: any, fileName: string, bucket: string = 'message-files') => {
+  // export const uploadFile = async (file: any, fileName: string, bucket: string = 'message-files') => {
+  //   try {
+  //     const { data, error } = await supabase.storage
+  //       .from(bucket)
+  //       .upload(fileName, file);
+
+  //     if (error) {
+  //       console.error('Upload error:', error);
+  //       return null;
+  //     }
+
+  //     // Récupérer l'URL publique
+  //     const { data: { publicUrl } } = supabase.storage
+  //       .from(bucket)
+  //       .getPublicUrl(fileName);
+
+  //     return publicUrl;
+  //   } catch (error) {
+  //     console.error('Upload error:', error);
+  //     return null;
+  //   }
+  // };
+
+
+// Dans lib/supabase.ts
+// export const uploadFile = async (file: any, fileName: string, bucket: string = 'message-files') => {
+//   try {
+//     // Note: la manière d'uploader un fichier en React Native est différente de celle du web.
+//     // Il faut transformer l'URI en Blob/ArrayBuffer.
+//     const fileUri = file.uri;
+//     const response = await fetch(fileUri);
+//     const blob = await response.blob();
+
+//     const { data, error } = await supabase.storage
+//       .from(bucket)
+//       .upload(fileName, blob, {
+//         contentType: blob.type,
+//         upsert: false,
+//       });
+
+//     if (error) {
+//       console.error('Upload error:', error);
+//       return null;
+//     }
+
+//     // On retourne le CHEMIN du fichier, pas l'URL
+//     return data.path;
+
+//   } catch (error) {
+//     console.error('Upload error:', error);
+//     return null;
+//   }
+//};
+
+// Dans lib/supabase.ts
+
+export const uploadFile = async (fileAsset: any, fileName: string, bucket: string = 'message-files') => {
   try {
+    const formData = new FormData();
+
+    // FormData en React Native accepte un objet avec uri, name, et type.
+    // C'est exactement ce que nous allons lui donner.
+    formData.append('file', {
+      uri: fileAsset.uri,
+      name: fileName,
+      // Fournir un type MIME est crucial pour que Supabase traite correctement le fichier.
+      type: fileAsset.mimeType || 'application/octet-stream',
+    } as any);
+
+    // Notez que nous passons formData comme deuxième argument.
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, file);
+      .upload(fileName, formData, {
+        // L'upsert est utile si vous voulez permettre le remplacement d'un fichier avec le même nom.
+        upsert: false,
+      });
 
     if (error) {
       console.error('Upload error:', error);
       return null;
     }
 
-    // Récupérer l'URL publique
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(fileName);
+    // On retourne toujours le CHEMIN du fichier.
+    return data.path;
 
-    return publicUrl;
   } catch (error) {
     console.error('Upload error:', error);
     return null;

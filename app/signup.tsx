@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Text } from '@/components/Themed';
-import { useUser } from '@/app/contexts/UserContext';
+import { useUser } from '@/contexts/UserContext';
 import { getAgencies, Agency } from '@/lib/supabase';
 
 const ROLES = [
