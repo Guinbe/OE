@@ -42,6 +42,24 @@ const PersonnelScreen = () => {
     if (isAdmin) {
       loadPersonnel();
       loadAgencies();
+//
+      const channel = supabase
+        .channel('realtime-users')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'users, agencies' },
+          (payload) => {
+            console.log('Changement dans les utilisateurs détecté.');
+            loadPersonnel();
+            loadAgencies();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+      //
     }
   }, [isAdmin]);
 

@@ -130,15 +130,15 @@ export default function ProfileScreen() {
         <Text style={styles.sectionTitle}>Statistiques générales</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>1,247</Text>
+            <Text style={styles.statNumber}>-</Text>
             <Text style={styles.statLabel}>Voyages</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>15</Text>
+            <Text style={styles.statNumber}>-</Text>
             <Text style={styles.statLabel}>Véhicules</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>25</Text>
+            <Text style={styles.statNumber}>-</Text>
             <Text style={styles.statLabel}>Chauffeurs</Text>
           </View>
         </View>

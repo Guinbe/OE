@@ -31,7 +31,23 @@ export default function AgenciesScreen() {
 
   useEffect(() => {
     loadAgencies();
-  }, []);
+
+    const channel = supabase
+      .channel('realtime-agencies')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agencies' },
+        (payload) => {
+          console.log('Changement dans les agences détecté.');
+          loadAgencies();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []); // Pas de dépendance nécessaire si ça ne dépend pas de l'utilisateur
 
   const loadAgencies = async () => {
     try {

@@ -28,6 +28,32 @@ const DashboardScreen = () => {
   useEffect(() => {
     if (user) {
       loadVoyages();
+      // ---- DÉBUT DU NOUVEAU CODE ----
+      
+          // 1. On crée un "canal" de communication unique pour cet écran.
+          const channel = supabase
+            .channel('realtime-voyages')
+            .on(
+              'postgres_changes', // On écoute les changements de la base de données
+              {
+                event: '*',       // '*' signifie INSERT, UPDATE, ou DELETE
+                schema: 'public',
+                table: 'voyages'  // On écoute spécifiquement la table 'voyages'
+              },
+              (payload) => {
+                // 2. Quand un changement est détecté, on affiche un log et on recharge les données.
+                console.log('Changement détecté dans les voyages !', payload);
+                loadVoyages();
+              }
+            )
+            .subscribe();
+      
+          // 3. Très important : on se désabonne quand l'écran est quitté.
+          return () => {
+            supabase.removeChannel(channel);
+          };
+      
+          // ---- FIN DU NOUVEAU CODE ----
     }
   }, [user]);
 
@@ -171,11 +197,11 @@ const DashboardScreen = () => {
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="location" size={20} color="#007bff" />
-                <Text style={styles.infoText}>Douala, Cameroun</Text>
+                <Text style={styles.infoText}>Meidougou, Cameroun</Text>
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="call" size={20} color="#007bff" />
-                <Text style={styles.infoText}>+237 6 90 12 34 56</Text>
+                <Text style={styles.infoText}>+237 6 00 00 00 00</Text>
               </View>
             </View>
           </View>

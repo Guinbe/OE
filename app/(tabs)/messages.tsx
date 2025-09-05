@@ -46,6 +46,32 @@ const MessagesScreen = () => {
     if (user) {
       loadGroups();
       loadUsers();
+
+      // ---- DÉBUT DU NOUVEAU CODE ----
+      const channel = supabase
+        .channel('realtime-groups')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_groups' },
+          (payload) => {
+            console.log('Changement dans les groupes détecté.');
+            loadGroups();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'group_members' },
+          (payload) => {
+            console.log('Changement dans les membres de groupe détecté.');
+            loadGroups();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+      // ---- FIN DU NOUVEAU CODE ----
     }
   }, [user]);
 
@@ -120,63 +146,131 @@ const MessagesScreen = () => {
   };
 
   // Sous-composant pour gérer le contenu asynchrone (images, etc.)
+  // const MessageContent = ({ message }: { message: Message }) => {
+  //   const [fileUrl, setFileUrl] = useState<string | null>(null);
+
+  //   useEffect(() => {
+  //     // Générer l'URL signée pour les images
+  //     if (message.message_type === 'image' && message.file_url) {
+  //       supabase.storage
+  //         .from('message-files')
+  //         .createSignedUrl(message.file_url, 3600) // Valide 1 heure
+  //         // .then(({ data }) => {
+  //         //   if (data) {
+  //         //     setFileUrl(data.signedUrl);
+  //         //   }
+  //         // });
+  //         .then(({ data, error }) => {
+  //           if (error) {
+  //             console.error('Error creating signed URL in component:', error.message);
+  //             return;
+  //           }
+  //           if (data) {
+  //             setFileUrl(data.signedUrl);
+  //           }
+  //         });
+  //     }
+  //   }, [message]);
+
+  //   if (message.message_type === 'text') {
+  //     return <Text style={styles.messageText}>{message.content}</Text>;
+  //   }
+
+  //   if (message.message_type === 'image') {
+  //     return fileUrl ? (
+  //       <View>
+  //         <Image source={{ uri: fileUrl }} style={styles.messageImage} />
+  //         <Text style={styles.messageText}>{message.content}</Text>
+  //       </View>
+  //     ) : (
+  //       <View style={styles.imagePlaceholder}>
+  //         <Ionicons name="image-outline" size={50} color="#ccc" />
+  //       </View>
+  //     );
+  //   }
+
+  //   // Pour les fichiers et vocaux, on rend un bouton
+  //   if (message.message_type === 'file' || message.message_type === 'voice') {
+  //     const iconName = message.message_type === 'file' ? 'document' : 'mic';
+  //     return (
+  //       <View style={styles.fileMessage}>
+  //         <Ionicons name={iconName} size={20} color="#007bff" />
+  //         <Text style={styles.messageText}>{message.content}</Text>
+  //       </View>
+  //     );
+  //   }
+
+  //   return null;
+  // };
+
+  // Dans le sous-composant MessageContent
+
+  // --- VERSION COMPLÈTE ET CORRECTE ---
+
   const MessageContent = ({ message }: { message: Message }) => {
     const [fileUrl, setFileUrl] = useState<string | null>(null);
 
     useEffect(() => {
-      // Générer l'URL signée pour les images
       if (message.message_type === 'image' && message.file_url) {
-        supabase.storage
-          .from('message-files')
-          .createSignedUrl(message.file_url, 3600) // Valide 1 heure
-          // .then(({ data }) => {
-          //   if (data) {
-          //     setFileUrl(data.signedUrl);
-          //   }
-          // });
-          .then(({ data, error }) => {
-            if (error) {
-              console.error('Error creating signed URL in component:', error.message);
-              return;
-            }
-            if (data) {
-              setFileUrl(data.signedUrl);
-            }
-          });
+        if (message.file_url.startsWith('file://')) {
+          setFileUrl(message.file_url);
+        } else {
+          supabase.storage
+            .from('message-files')
+            .createSignedUrl(message.file_url, 3600)
+            .then(({ data, error }) => {
+              if (error) {
+                console.error('Error creating signed URL in component:', error.message);
+                return;
+              }
+              if (data) {
+                setFileUrl(data.signedUrl);
+              }
+            });
+        }
       }
     }, [message]);
 
+    // ---- DÉBUT DE LA PARTIE MANQUANTE ----
+
+    // Si c'est un message texte, on affiche le contenu
     if (message.message_type === 'text') {
       return <Text style={styles.messageText}>{message.content}</Text>;
     }
 
+    // Si c'est une image
     if (message.message_type === 'image') {
       return fileUrl ? (
+        // Si l'URL est prête, on affiche l'image
         <View>
           <Image source={{ uri: fileUrl }} style={styles.messageImage} />
           <Text style={styles.messageText}>{message.content}</Text>
         </View>
       ) : (
+        // Sinon, on affiche un placeholder de chargement
         <View style={styles.imagePlaceholder}>
           <Ionicons name="image-outline" size={50} color="#ccc" />
         </View>
       );
     }
 
-    // Pour les fichiers et vocaux, on rend un bouton
+    // Si c'est un fichier ou un message vocal
     if (message.message_type === 'file' || message.message_type === 'voice') {
       const iconName = message.message_type === 'file' ? 'document' : 'mic';
       return (
         <View style={styles.fileMessage}>
-          <Ionicons name={iconName} size={20} color="#007bff" />
-          <Text style={styles.messageText}>{message.content}</Text>
+          <Ionicons name={iconName} size={20} color={styles.messageText.color} />
+          <Text style={[styles.messageText, { marginLeft: 8 }]}>{message.content}</Text>
         </View>
       );
     }
 
+    // Si le type est inconnu, on ne retourne rien
     return null;
+
+    // ---- FIN DE LA PARTIE MANQUANTE ----
   };
-  //-- fin
+  //-- fin -----
 
   const loadGroups = async () => {
     try {
@@ -273,25 +367,109 @@ const MessagesScreen = () => {
   const subscribeToMessages = () => {
     if (!selectedGroup) return null;
 
+    // return supabase
+    //   .channel(`messages:${selectedGroup.id}`)
+    //   .on(
+    //     'postgres_changes',
+    //     {
+    //       event: 'INSERT',
+    //       schema: 'public',
+    //       table: 'messages',
+    //       filter: `group_id=eq.${selectedGroup.id}`,
+    //     },
+    //     (payload) => {
+    //       loadMessages(); // Recharger les messages
+    //     }
+    //   )
+    //   .subscribe();
+
     return supabase
       .channel(`messages:${selectedGroup.id}`)
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*', // <-- MODIFIÉ : écoute tous les événements
           schema: 'public',
           table: 'messages',
           filter: `group_id=eq.${selectedGroup.id}`,
         },
         (payload) => {
-          loadMessages(); // Recharger les messages
+          console.log('Nouveau message ou changement détecté !');
+          loadMessages();
         }
       )
       .subscribe();
+
   };
+
+  // const handleSendMessage = async () => {
+  //   if (!newMessage.trim() || !selectedGroup || !user) return;
+
+  //   try {
+  //     const { error } = await supabase
+  //       .from('messages')
+  //       .insert({
+  //         sender_id: user.id,
+  //         group_id: selectedGroup.id,
+  //         content: newMessage.trim(),
+  //         message_type: 'text',
+  //       });
+
+  //     if (error) {
+  //       console.error('Error sending message:', error);
+  //       Alert.alert('Erreur', 'Impossible d\'envoyer le message');
+  //       return;
+  //     }
+
+  //     setNewMessage('');
+  //   } catch (error) {
+  //     console.error('Error sending message:', error);
+  //     Alert.alert('Erreur', 'Une erreur est survenue');
+  //   }
+  // };
+
+  // const handleSendMessage = async () => {
+  //   if (!newMessage.trim() || !selectedGroup || !user) return;
+
+  //   const content = newMessage.trim();
+  //   setNewMessage(''); // Vider le champ de saisie immédiatement
+
+  //   // Création d'un message "optimiste"
+  //   // --- DÉBUT DE LA MISE À JOUR OPTIMISTE ---
+  //   // 1. On crée un faux message temporaire avec les infos qu'on a.
+  //   const optimisticMessage: Message = {
+  //     id: Math.random().toString(), // Un ID temporaire aléatoire
+  //     sender_id: user.id,
+  //     group_id: selectedGroup.id,
+  //     content: content,
+  //     message_type: 'text',
+  //     created_at: new Date().toISOString(),
+  //     // On simule l'objet 'sender' pour un affichage instantané
+  //     sender: { full_name: user.full_name, email: user.email },
+  //   };
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedGroup || !user) return;
+
+    const content = newMessage.trim();
+    setNewMessage(''); // Vider le champ de saisie immédiatement
+
+    // --- DÉBUT DE LA MISE À JOUR OPTIMISTE ---
+    // 1. On crée un faux message temporaire avec les infos qu'on a.
+    const optimisticMessage: Message = {
+      id: Math.random().toString(), // Un ID temporaire aléatoire
+      sender_id: user.id,
+      group_id: selectedGroup.id,
+      content: content,
+      message_type: 'text',
+      created_at: new Date().toISOString(),
+      // On simule l'objet 'sender' pour un affichage instantané
+      sender: { full_name: user.full_name, email: user.email },
+    };
+
+    // 2. On l'ajoute immédiatement à notre liste de messages.
+    setMessages(currentMessages => [...currentMessages, optimisticMessage]);
+    // --- FIN DE LA MISE À JOUR OPTIMISTE ---
 
     try {
       const { error } = await supabase
@@ -299,22 +477,79 @@ const MessagesScreen = () => {
         .insert({
           sender_id: user.id,
           group_id: selectedGroup.id,
-          content: newMessage.trim(),
+          content: content,
           message_type: 'text',
         });
 
       if (error) {
         console.error('Error sending message:', error);
-        Alert.alert('Erreur', 'Impossible d\'envoyer le message');
-        return;
+        Alert.alert('Erreur', "Le message n'a pas pu être envoyé.");
+        // En cas d'erreur, on retire le message optimiste
+        setMessages(currentMessages => currentMessages.filter(m => m.id !== optimisticMessage.id));
       }
+      // Si ça réussit, pas besoin de rien faire. La souscription temps réel
+      // va rafraîchir la liste avec le vrai message de la BDD.
 
-      setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Erreur', 'Une erreur est survenue');
+      setMessages(currentMessages => currentMessages.filter(m => m.id !== optimisticMessage.id));
     }
   };
+
+  // Dans MessagesScreen.tsx, à placer avant les fonctions handle...Picker
+
+  const sendFileMessage = async (
+    fileAsset: any,
+    fileName: string,
+    messageType: 'image' | 'file' | 'voice',
+    content: string
+  ) => {
+    if (!selectedGroup || !user) return;
+
+    // --- MISE À JOUR OPTIMISTE ---
+    const optimisticMessage: Message = {
+      id: Math.random().toString(),
+      sender_id: user.id,
+      group_id: selectedGroup.id,
+      content: `Envoi de ${messageType}...`, // Message temporaire
+      message_type: messageType,
+      file_url: fileAsset.uri, // On utilise l'URI local pour un affichage immédiat
+      created_at: new Date().toISOString(),
+      sender: { full_name: user.full_name, email: user.email },
+    };
+    setMessages(currentMessages => [...currentMessages, optimisticMessage]);
+    // --- FIN OPTIMISTE ---
+
+    try {
+      const filePath = await uploadFile(fileAsset, fileName);
+
+      if (filePath) {
+        const { error } = await supabase
+          .from('messages')
+          .insert({
+            sender_id: user.id,
+            group_id: selectedGroup.id,
+            content: content,
+            message_type: messageType,
+            file_url: filePath,
+          });
+
+        if (error) throw error;
+        // Si succès, la souscription mettra à jour avec la vraie URL.
+
+      } else {
+        throw new Error("L'upload a échoué.");
+      }
+    } catch (error) {
+      console.error(`Error sending ${messageType}:`, error);
+      Alert.alert('Erreur', `Impossible d'envoyer le fichier.`);
+      // En cas d'erreur, on retire le message optimiste.
+      setMessages(currentMessages => currentMessages.filter(m => m.id !== optimisticMessage.id));
+    }
+  };
+
+//-- fin
 
   const handleImagePicker = async () => {
     try {
@@ -347,6 +582,15 @@ const MessagesScreen = () => {
           Alert.alert('Erreur', 'Impossible d\'uploader l\'image');
         }
       }
+
+      // Dans handleImagePicker
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const fileName = `image_${Date.now()}.jpg`;
+        // On appelle notre nouvelle fonction
+        await sendFileMessage(asset, fileName, 'image', 'Image partagée');
+      }
+
     } catch (error) {
       console.error('Error picking image:', error);
       Alert.alert('Erreur', 'Impossible de sélectionner l\'image');
@@ -381,6 +625,15 @@ const MessagesScreen = () => {
           Alert.alert('Erreur', 'Impossible d\'uploader le fichier');
         }
       }
+
+      // Dans handleDocumentPicker
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const fileName = `file_${Date.now()}_${asset.name}`;
+        // On appelle notre nouvelle fonction
+        await sendFileMessage(asset, fileName, 'file', `Fichier: ${asset.name}`);
+      }
+
     } catch (error) {
       console.error('Error picking document:', error);
       Alert.alert('Erreur', 'Impossible de sélectionner le fichier');
@@ -439,6 +692,13 @@ const MessagesScreen = () => {
         } else {
           Alert.alert('Erreur', 'Impossible d\'uploader le message vocal');
         }
+      }
+
+      // Dans stopRecording
+      if (uri) {
+        const fileName = `voice_${Date.now()}.m4a`;
+        // On appelle notre nouvelle fonction
+        await sendFileMessage({ uri, mimeType: 'audio/mp4' }, fileName, 'voice', 'Message vocal');
       }
 
       setRecording(null);
@@ -1134,6 +1394,22 @@ const styles = StyleSheet.create({
   memberEmail: {
     fontSize: 14,
     color: '#666',
+  },
+  // Ajoutez ces deux styles :
+  imagePlaceholder: {
+    width: 200,
+    height: 150,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  // Assurez-vous que la couleur du texte et des icônes est cohérente
+  // en modifiant la couleur dans .messageText
+  messageText: {
+    fontSize: 16,
+    color: '#333', // Assurez-vous que cette couleur est définie
   },
 });
 
